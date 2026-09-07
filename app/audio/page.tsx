@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, ChangeEvent } from "react";
 import { motion } from "framer-motion";
 import { fileToBase64 } from "@/lib/utils";
-import { callGeminiApi } from "@/lib/gemini";
+import { callGeminiApi, extractTextFromResponse, extractAudioFromResponse } from "@/lib/gemini";
 import StatusBanner from "@/components/StatusBanner";
 
 /* ---------------- Utilities ---------------- */
@@ -118,27 +118,25 @@ export default function AudioStudio() {
 
         try {
             const base64Data = await fileToBase64(selectedFile);
+            const mediaType = selectedFile.type.startsWith("image/") ? "image" : "document";
 
             const payload = {
-                input: {
-                    parts: [
-                        {
-                            text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary.",
-                        },
-                        {
-                            inlineData: {
-                                mimeType: selectedFile.type,
-                                data: base64Data,
-                            },
-                        },
-                    ],
-                },
+                input: [
+                    {
+                        type: "text",
+                        text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary.",
+                    },
+                    {
+                        type: mediaType,
+                        data: base64Data,
+                        mime_type: selectedFile.type || (mediaType === "image" ? "image/png" : "application/pdf"),
+                    },
+                ],
             };
 
             const result = await callGeminiApi("gemini-3.6-flash", payload);
 
-            const extracted =
-                result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            const extracted = extractTextFromResponse(result);
 
             setTextInput(extracted.trim());
 
@@ -164,15 +162,14 @@ export default function AudioStudio() {
         try {
             const payload = {
                 input: `Say this: ${textInput}`,
-                response_modalities: ["AUDIO"],
+                response_format: { type: "audio" },
+                response_modalities: ["audio"],
                 generation_config: {
-                    speech_config: {
-                        voice_config: {
-                            prebuilt_voice_config: {
-                                voice_name: "Kore",
-                            },
+                    speech_config: [
+                        {
+                            voice: "Kore",
                         },
-                    },
+                    ],
                 },
             };
 
@@ -181,9 +178,11 @@ export default function AudioStudio() {
                 payload
             );
 
-            const part = result?.candidates?.[0]?.content?.parts?.[0];
+            const audioData = extractAudioFromResponse(result);
 
-            const audioData = part?.inlineData?.data;
+            if (!audioData) {
+                throw new Error("No audio data returned by the API.");
+            }
 
             const sampleRate = 24000;
             const pcm = base64ToArrayBuffer(audioData);

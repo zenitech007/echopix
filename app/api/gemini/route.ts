@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server';
 const ALLOWED_MODELS = new Set([
     'gemini-3.6-flash',
     'gemini-3.6-flash-tts',
+    'gemini-3.8-flash',
+    'gemini-3.1-flash-tts-preview',
 ]);
 
 export async function POST(request: Request) {

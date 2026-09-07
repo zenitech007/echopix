@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, ChangeEvent } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { fileToBase64 } from "@/lib/utils";
-import { callGeminiApi } from "@/lib/gemini";
+import { callGeminiApi, extractTextFromResponse } from "@/lib/gemini";
 import StatusBanner from "@/components/StatusBanner";
 
 interface Flashcard {
@@ -96,18 +96,24 @@ export default function FlashcardsPage() {
 
         try {
             const base64Data = await fileToBase64(selectedFile);
+            const mediaType = selectedFile.type.startsWith("image/") ? "image" : "document";
 
             const payload = {
-                input: {
-                    parts: [
-                        { text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary." },
-                        { inlineData: { mimeType: selectedFile.type, data: base64Data } },
-                    ],
-                },
+                input: [
+                    {
+                        type: "text",
+                        text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary.",
+                    },
+                    {
+                        type: mediaType,
+                        data: base64Data,
+                        mime_type: selectedFile.type || (mediaType === "image" ? "image/png" : "application/pdf"),
+                    },
+                ],
             };
 
             const result = await callGeminiApi("gemini-3.6-flash", payload);
-            const extracted = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            const extracted = extractTextFromResponse(result);
 
             // Append extracted text to whatever the user has already typed
             setInputText((prev) => (prev ? prev + "\n\n" + extracted.trim() : extracted.trim()));
@@ -137,13 +143,14 @@ export default function FlashcardsPage() {
 Return ONLY a raw JSON array of objects, with each object having a "question" string and an "answer" string. 
 Do not include markdown formatting or the word json. 
 Text: ${inputText}`,
-                generation_config: {
-                    response_mime_type: "application/json",
+                response_format: {
+                    type: "text",
+                    mime_type: "application/json",
                 },
             };
 
             const result = await callGeminiApi("gemini-3.6-flash", payload);
-            const textResponse = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            const textResponse = extractTextFromResponse(result);
 
             // Clean up potential markdown wrappers
             const cleanJson = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
