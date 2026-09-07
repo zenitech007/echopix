@@ -120,24 +120,22 @@ export default function AudioStudio() {
             const base64Data = await fileToBase64(selectedFile);
 
             const payload = {
-                contents: [
-                    {
-                        parts: [
-                            {
-                                text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary.",
+                input: {
+                    parts: [
+                        {
+                            text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary.",
+                        },
+                        {
+                            inlineData: {
+                                mimeType: selectedFile.type,
+                                data: base64Data,
                             },
-                            {
-                                inlineData: {
-                                    mimeType: selectedFile.type,
-                                    data: base64Data,
-                                },
-                            },
-                        ],
-                    },
-                ],
+                        },
+                    ],
+                },
             };
 
-            const result = await callGeminiApi("gemini-2.5-flash", payload);
+            const result = await callGeminiApi("gemini-3.6-flash", payload);
 
             const extracted =
                 result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -165,14 +163,21 @@ export default function AudioStudio() {
 
         try {
             const payload = {
-                contents: [{ parts: [{ text: `Say this: ${textInput}` }] }],
-                generationConfig: {
-                    responseModalities: ["AUDIO"],
+                input: `Say this: ${textInput}`,
+                response_modalities: ["AUDIO"],
+                generation_config: {
+                    speech_config: {
+                        voice_config: {
+                            prebuilt_voice_config: {
+                                voice_name: "Kore",
+                            },
+                        },
+                    },
                 },
             };
 
             const result = await callGeminiApi(
-                "gemini-2.5-flash-preview-tts",
+                "gemini-3.6-flash-tts",
                 payload
             );
 

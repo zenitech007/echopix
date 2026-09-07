@@ -98,17 +98,15 @@ export default function FlashcardsPage() {
             const base64Data = await fileToBase64(selectedFile);
 
             const payload = {
-                contents: [
-                    {
-                        parts: [
-                            { text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary." },
-                            { inlineData: { mimeType: selectedFile.type, data: base64Data } },
-                        ],
-                    },
-                ],
+                input: {
+                    parts: [
+                        { text: "Extract all visible text from this file. Return ONLY the extracted text with no additional commentary." },
+                        { inlineData: { mimeType: selectedFile.type, data: base64Data } },
+                    ],
+                },
             };
 
-            const result = await callGeminiApi("gemini-2.5-flash", payload);
+            const result = await callGeminiApi("gemini-3.6-flash", payload);
             const extracted = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
             // Append extracted text to whatever the user has already typed
@@ -135,24 +133,16 @@ export default function FlashcardsPage() {
 
         try {
             const payload = {
-                contents: [
-                    {
-                        parts: [
-                            {
-                                text: `Create exactly ${cardCount} educational flashcards from the following text. Extract the most important concepts. 
-                Return ONLY a raw JSON array of objects, with each object having a "question" string and an "answer" string. 
-                Do not include markdown formatting or the word json. 
-                Text: ${inputText}`,
-                            },
-                        ],
-                    },
-                ],
-                generationConfig: {
-                    responseMimeType: "application/json",
+                input: `Create exactly ${cardCount} educational flashcards from the following text. Extract the most important concepts. 
+Return ONLY a raw JSON array of objects, with each object having a "question" string and an "answer" string. 
+Do not include markdown formatting or the word json. 
+Text: ${inputText}`,
+                generation_config: {
+                    response_mime_type: "application/json",
                 },
             };
 
-            const result = await callGeminiApi("gemini-2.5-flash", payload);
+            const result = await callGeminiApi("gemini-3.6-flash", payload);
             const textResponse = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
             // Clean up potential markdown wrappers

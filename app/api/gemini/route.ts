@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 
 /** Models that clients are allowed to request. */
 const ALLOWED_MODELS = new Set([
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-preview-tts',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.6-flash-tts',
 ]);
 
 export async function POST(request: Request) {
@@ -46,12 +44,20 @@ export async function POST(request: Request) {
             );
         }
 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        // --- Interactions API ---
+        const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 
         const response = await fetch(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey,
+            },
+            body: JSON.stringify({
+                model: `models/${model}`,
+                store: false,
+                ...payload,
+            }),
         });
 
         const data = await response.json();
