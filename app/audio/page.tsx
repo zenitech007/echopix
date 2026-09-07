@@ -57,6 +57,21 @@ const pcmToWav = (
     return new Blob([view, pcmData as any], { type: "audio/wav" });
 };
 
+const audioBufferToBlob = (buffer: ArrayBuffer): Blob => {
+    const bytes = new Uint8Array(buffer);
+    // Check if it already has a RIFF header (WAV)
+    if (bytes.length >= 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+        return new Blob([buffer], { type: "audio/wav" });
+    }
+    // Check if it's MP3 (ID3 header)
+    if (bytes.length >= 3 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+        return new Blob([buffer], { type: "audio/mp3" });
+    }
+    // Default: convert raw 24kHz 16-bit mono PCM to WAV
+    const pcm16 = new Int16Array(buffer);
+    return pcmToWav(pcm16, 1, 24000);
+};
+
 /* ---------------- Component ---------------- */
 
 export default function AudioStudio() {
@@ -117,8 +132,33 @@ export default function AudioStudio() {
         setStatus({ message: "Analyzing document...", type: "loading" });
 
         try {
+            // Direct handler for text files (.txt)
+            if (selectedFile.type === "text/plain" || selectedFile.name.endsWith(".txt")) {
+                const text = await selectedFile.text();
+                if (text.trim()) {
+                    setTextInput((prev) => (prev ? prev + "\n\n" + text.trim() : text.trim()));
+                    setSelectedFile(null);
+                    setStatus({ message: "Text file loaded!", type: "success" });
+                    setIsExtracting(false);
+                    return;
+                }
+            }
+
             const base64Data = await fileToBase64(selectedFile);
-            const mediaType = selectedFile.type.startsWith("image/") ? "image" : "document";
+
+            // Determine MIME type with extension fallback
+            let mimeType = selectedFile.type;
+            if (!mimeType) {
+                const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+                if (ext === 'png') mimeType = 'image/png';
+                else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+                else if (ext === 'webp') mimeType = 'image/webp';
+                else if (ext === 'gif') mimeType = 'image/gif';
+                else if (ext === 'pdf') mimeType = 'application/pdf';
+                else mimeType = 'image/jpeg';
+            }
+
+            const mediaType = mimeType.startsWith("image/") ? "image" : "document";
 
             const payload = {
                 input: [
@@ -129,16 +169,30 @@ export default function AudioStudio() {
                     {
                         type: mediaType,
                         data: base64Data,
-                        mime_type: selectedFile.type || (mediaType === "image" ? "image/png" : "application/pdf"),
+                        mime_type: mimeType,
                     },
                 ],
             };
 
-            const result = await callGeminiApi("gemini-3.6-flash", payload);
+            let result;
+            try {
+                result = await callGeminiApi("gemini-3.6-flash", payload);
+            } catch (err: any) {
+                if (err.message?.includes("not found") || err.message?.includes("404")) {
+                    result = await callGeminiApi("gemini-2.5-flash", payload);
+                } else {
+                    throw err;
+                }
+            }
 
             const extracted = extractTextFromResponse(result);
 
-            setTextInput(extracted.trim());
+            if (!extracted || !extracted.trim()) {
+                throw new Error("No text could be extracted from this image. Please ensure the image contains clear, readable text.");
+            }
+
+            setTextInput((prev) => (prev ? prev + "\n\n" + extracted.trim() : extracted.trim()));
+            setSelectedFile(null);
 
             setStatus({
                 message: "Text successfully extracted!",
@@ -173,10 +227,16 @@ export default function AudioStudio() {
                 },
             };
 
-            const result = await callGeminiApi(
-                "gemini-3.6-flash-tts",
-                payload
-            );
+            let result;
+            try {
+                result = await callGeminiApi("gemini-3.1-flash-tts-preview", payload);
+            } catch (err: any) {
+                if (err.message?.includes("not found") || err.message?.includes("404")) {
+                    result = await callGeminiApi("gemini-2.5-flash-preview-tts", payload);
+                } else {
+                    throw err;
+                }
+            }
 
             const audioData = extractAudioFromResponse(result);
 
@@ -184,11 +244,8 @@ export default function AudioStudio() {
                 throw new Error("No audio data returned by the API.");
             }
 
-            const sampleRate = 24000;
             const pcm = base64ToArrayBuffer(audioData);
-            const pcm16 = new Int16Array(pcm);
-
-            const wavBlob = pcmToWav(pcm16, 1, sampleRate);
+            const wavBlob = audioBufferToBlob(pcm);
 
             if (audioUrl) URL.revokeObjectURL(audioUrl);
 

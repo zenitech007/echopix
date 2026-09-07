@@ -95,8 +95,33 @@ export default function FlashcardsPage() {
         setStatus({ message: "Analyzing document...", type: "loading" });
 
         try {
+            // Direct handler for text files (.txt)
+            if (selectedFile.type === "text/plain" || selectedFile.name.endsWith(".txt")) {
+                const text = await selectedFile.text();
+                if (text.trim()) {
+                    setInputText((prev) => (prev ? prev + "\n\n" + text.trim() : text.trim()));
+                    setSelectedFile(null);
+                    setStatus({ message: "Text file loaded! You can now generate your deck.", type: "success" });
+                    setIsExtracting(false);
+                    return;
+                }
+            }
+
             const base64Data = await fileToBase64(selectedFile);
-            const mediaType = selectedFile.type.startsWith("image/") ? "image" : "document";
+
+            // Determine MIME type with extension fallback
+            let mimeType = selectedFile.type;
+            if (!mimeType) {
+                const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+                if (ext === 'png') mimeType = 'image/png';
+                else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+                else if (ext === 'webp') mimeType = 'image/webp';
+                else if (ext === 'gif') mimeType = 'image/gif';
+                else if (ext === 'pdf') mimeType = 'application/pdf';
+                else mimeType = 'image/jpeg';
+            }
+
+            const mediaType = mimeType.startsWith("image/") ? "image" : "document";
 
             const payload = {
                 input: [
@@ -107,13 +132,27 @@ export default function FlashcardsPage() {
                     {
                         type: mediaType,
                         data: base64Data,
-                        mime_type: selectedFile.type || (mediaType === "image" ? "image/png" : "application/pdf"),
+                        mime_type: mimeType,
                     },
                 ],
             };
 
-            const result = await callGeminiApi("gemini-3.6-flash", payload);
+            let result;
+            try {
+                result = await callGeminiApi("gemini-3.6-flash", payload);
+            } catch (err: any) {
+                if (err.message?.includes("not found") || err.message?.includes("404")) {
+                    result = await callGeminiApi("gemini-2.5-flash", payload);
+                } else {
+                    throw err;
+                }
+            }
+
             const extracted = extractTextFromResponse(result);
+
+            if (!extracted || !extracted.trim()) {
+                throw new Error("No text could be extracted from this image. Please ensure the image contains clear, readable text.");
+            }
 
             // Append extracted text to whatever the user has already typed
             setInputText((prev) => (prev ? prev + "\n\n" + extracted.trim() : extracted.trim()));
@@ -149,11 +188,27 @@ Text: ${inputText}`,
                 },
             };
 
-            const result = await callGeminiApi("gemini-3.6-flash", payload);
+            let result;
+            try {
+                result = await callGeminiApi("gemini-3.6-flash", payload);
+            } catch (err: any) {
+                if (err.message?.includes("not found") || err.message?.includes("404")) {
+                    result = await callGeminiApi("gemini-2.5-flash", payload);
+                } else {
+                    throw err;
+                }
+            }
+
             const textResponse = extractTextFromResponse(result);
 
             // Clean up potential markdown wrappers
-            const cleanJson = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
+            let cleanJson = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
+            const firstBracket = cleanJson.indexOf('[');
+            const lastBracket = cleanJson.lastIndexOf(']');
+            if (firstBracket !== -1 && lastBracket !== -1) {
+                cleanJson = cleanJson.substring(firstBracket, lastBracket + 1);
+            }
+
             const generatedCards: Flashcard[] = JSON.parse(cleanJson);
 
             if (generatedCards && generatedCards.length > 0) {

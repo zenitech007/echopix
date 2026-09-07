@@ -14,7 +14,7 @@ export async function callGeminiApi(model: string, payload: Record<string, unkno
 
     if (!res.ok) {
         const body = await res.json();
-        throw new Error(body?.error?.message || "API error");
+        throw new Error(body?.error?.message || body?.message || "API error");
     }
 
     return res.json();
@@ -38,17 +38,37 @@ export function extractTextFromResponse(result: any): string {
     if (Array.isArray(result.steps)) {
         const textParts: string[] = [];
         for (const step of result.steps) {
-            if (typeof step?.text === "string") {
+            // Only process model outputs (skip user_input, thought, etc.)
+            if (step?.type && step.type !== "model_output") {
+                continue;
+            }
+
+            // Direct text on step
+            if (typeof step?.text === "string" && step.text) {
                 textParts.push(step.text);
+            }
+
+            // step.content is an array of items: [{"type": "text", "text": "..."}]
+            if (Array.isArray(step?.content)) {
+                for (const item of step.content) {
+                    if (typeof item?.text === "string" && item.text) {
+                        textParts.push(item.text);
+                    }
+                }
+            } else if (typeof step?.content === "string" && step.content) {
+                textParts.push(step.content);
             } else if (Array.isArray(step?.content?.parts)) {
                 for (const part of step.content.parts) {
-                    if (typeof part?.text === "string") {
+                    if (typeof part?.text === "string" && part.text) {
                         textParts.push(part.text);
                     }
                 }
-            } else if (Array.isArray(step?.parts)) {
+            }
+
+            // step.parts fallback
+            if (Array.isArray(step?.parts)) {
                 for (const part of step.parts) {
-                    if (typeof part?.text === "string") {
+                    if (typeof part?.text === "string" && part.text) {
                         textParts.push(part.text);
                     }
                 }
@@ -70,7 +90,12 @@ export function extractTextFromResponse(result: any): string {
     // 4. Outputs array (alternative preview format)
     if (Array.isArray(result.outputs)) {
         for (const out of result.outputs) {
-            if (typeof out?.text === "string") return out.text;
+            if (typeof out?.text === "string" && out.text) return out.text;
+            if (Array.isArray(out?.content)) {
+                for (const item of out.content) {
+                    if (typeof item?.text === "string" && item.text) return item.text;
+                }
+            }
         }
     }
 
@@ -90,9 +115,23 @@ export function extractAudioFromResponse(result: any): string | null {
     // 2. Steps array (Interactions API standard response)
     if (Array.isArray(result.steps)) {
         for (const step of result.steps) {
+            if (step?.type && step.type !== "model_output") continue;
+
             if (typeof step?.audio === "string") return step.audio;
             if (step?.audio?.data) return step.audio.data;
 
+            // In Interactions API, step.content is an array of items: [{"type": "audio", "data": "..."}]
+            if (Array.isArray(step?.content)) {
+                for (const item of step.content) {
+                    if (item?.type === "audio" && item?.data) return item.data;
+                    if (item?.inlineData?.data) return item.inlineData.data;
+                    if (item?.data && (item?.mime_type?.startsWith("audio/") || item?.mimeType?.startsWith("audio/"))) {
+                        return item.data;
+                    }
+                }
+            }
+
+            // step.content.parts or step.parts fallback
             const parts = step?.content?.parts || step?.parts || step?.output;
             if (Array.isArray(parts)) {
                 for (const part of parts) {
