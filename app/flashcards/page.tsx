@@ -1,25 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, ChangeEvent } from "react";
+import React, { useState, useEffect, useCallback, ChangeEvent } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { fileToBase64 } from "@/lib/utils";
+import { callGeminiApi } from "@/lib/gemini";
+import StatusBanner from "@/components/StatusBanner";
 
 interface Flashcard {
     question: string;
     answer: string;
 }
-
-/* ---------------- Utilities ---------------- */
-const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
 
 export default function FlashcardsPage() {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -27,6 +18,7 @@ export default function FlashcardsPage() {
     const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
     const [currentCardIndex, setCurrentCardIndex] = useState(0);
     const [isFlipped, setIsFlipped] = useState(false);
+    const [cardCount, setCardCount] = useState(5);
 
     const [isExtracting, setIsExtracting] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -44,20 +36,49 @@ export default function FlashcardsPage() {
         }
     }, []);
 
-    const callGeminiApi = async (model: string, payload: any) => {
-        const res = await fetch("/api/gemini", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model, payload }),
-        });
+    /* ---------- Deck Controls ---------- */
+    const nextCard = useCallback(() => {
+        setIsFlipped(false);
+        setTimeout(() => {
+            setCurrentCardIndex((prev) => (prev + 1) % flashcards.length);
+        }, 150);
+    }, [flashcards.length]);
 
-        if (!res.ok) {
-            const body = await res.json();
-            throw new Error(body?.error?.message || "API error");
-        }
+    const prevCard = useCallback(() => {
+        setIsFlipped(false);
+        setTimeout(() => {
+            setCurrentCardIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
+        }, 150);
+    }, [flashcards.length]);
 
-        return res.json();
+    const clearDeck = () => {
+        setFlashcards([]);
+        localStorage.removeItem("echopix_flashcards");
+        setStatus({ message: "Deck cleared.", type: "info" });
     };
+
+    // Keyboard navigation for flashcards
+    useEffect(() => {
+        if (flashcards.length === 0) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            switch (e.key) {
+                case "ArrowRight":
+                    nextCard();
+                    break;
+                case "ArrowLeft":
+                    prevCard();
+                    break;
+                case " ":
+                    e.preventDefault();
+                    setIsFlipped((prev) => !prev);
+                    break;
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [flashcards.length, nextCard, prevCard]);
 
     /* ---------- File Extraction ---------- */
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -118,7 +139,7 @@ export default function FlashcardsPage() {
                     {
                         parts: [
                             {
-                                text: `Create exactly 5 educational flashcards from the following text. Extract the most important concepts. 
+                                text: `Create exactly ${cardCount} educational flashcards from the following text. Extract the most important concepts. 
                 Return ONLY a raw JSON array of objects, with each object having a "question" string and an "answer" string. 
                 Do not include markdown formatting or the word json. 
                 Text: ${inputText}`,
@@ -152,36 +173,6 @@ export default function FlashcardsPage() {
             setStatus({ message: err.message || "Something went wrong.", type: "error" });
         } finally {
             setIsGenerating(false);
-        }
-    };
-
-    /* ---------- Deck Controls ---------- */
-    const nextCard = () => {
-        setIsFlipped(false);
-        setTimeout(() => {
-            setCurrentCardIndex((prev) => (prev + 1) % flashcards.length);
-        }, 150);
-    };
-
-    const prevCard = () => {
-        setIsFlipped(false);
-        setTimeout(() => {
-            setCurrentCardIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
-        }, 150);
-    };
-
-    const clearDeck = () => {
-        setFlashcards([]);
-        localStorage.removeItem("echopix_flashcards");
-        setStatus({ message: "Deck cleared.", type: "info" });
-    };
-
-    const getStatusColor = () => {
-        switch (status.type) {
-            case "success": return "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/20";
-            case "error": return "text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20";
-            case "loading": return "text-teal-700 bg-teal-50 border-teal-200 dark:text-teal-400 dark:bg-teal-500/10 dark:border-teal-500/20";
-            default: return "text-slate-600 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-white/5 dark:border-white/10";
         }
     };
 
@@ -257,6 +248,20 @@ export default function FlashcardsPage() {
                                 placeholder="✍️ Or paste your paragraph, summary, or lecture notes here..."
                             />
 
+                            {/* Card Count Selector */}
+                            <div className="flex items-center gap-3">
+                                <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Cards to generate:</label>
+                                <select
+                                    value={cardCount}
+                                    onChange={(e) => setCardCount(Number(e.target.value))}
+                                    className="bg-white dark:bg-[#070b16]/60 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                >
+                                    {[3, 5, 10, 15, 20].map((n) => (
+                                        <option key={n} value={n}>{n}</option>
+                                    ))}
+                                </select>
+                            </div>
+
                             {/* Generate Button */}
                             <motion.button
                                 whileHover={{ scale: 1.02 }}
@@ -277,8 +282,23 @@ export default function FlashcardsPage() {
                                 <button onClick={clearDeck} className="hover:text-rose-500 dark:hover:text-rose-400 transition-colors">🗑️ Clear Deck</button>
                             </div>
 
+                            {/* Progress Bar */}
+                            <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-1.5 mb-6">
+                                <div
+                                    className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+                                    style={{ width: `${((currentCardIndex + 1) / flashcards.length) * 100}%` }}
+                                />
+                            </div>
+
                             {/* 3D Flashcard */}
-                            <div className="w-full h-64 perspective-1000 cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
+                            <div
+                                className="w-full h-64 perspective-1000 cursor-pointer"
+                                onClick={() => setIsFlipped(!isFlipped)}
+                                tabIndex={0}
+                                role="button"
+                                aria-label={isFlipped ? "Hide answer" : "Show answer"}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsFlipped(!isFlipped); } }}
+                            >
                                 <motion.div
                                     className="w-full h-full relative preserve-3d"
                                     animate={{ rotateY: isFlipped ? 180 : 0 }}
@@ -311,11 +331,7 @@ export default function FlashcardsPage() {
                         </div>
                     )}
 
-                    {status.message && (
-                        <div className={`mt-6 px-4 py-3 text-center rounded-xl border ${getStatusColor()}`}>
-                            {status.message}
-                        </div>
-                    )}
+                    <StatusBanner message={status.message} type={status.type as "info" | "success" | "error" | "loading"} className="text-center" />
                 </motion.main>
             </motion.div>
         </div>

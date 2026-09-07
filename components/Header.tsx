@@ -17,6 +17,10 @@ export default function Header() {
         return () => window.removeEventListener("scroll", handleScroll);
     }, []);
 
+    useEffect(() => {
+        setOpen(false);
+    }, [pathname]);
+
     return (
         <motion.header
             animate={{ height: scrolled ? 60 : 72 }}
@@ -64,7 +68,7 @@ export default function Header() {
                         <Link 
                             href="/audio" 
                             onClick={() => setOpen(false)}
-                            className="text-slate-700 dark:text-slate-200 font-medium text-lg"
+                            className={`font-medium text-lg ${pathname === '/audio' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-200'}`}
                         >
                             Audio Studio
                         </Link>
@@ -72,7 +76,7 @@ export default function Header() {
                         <Link 
                             href="/flashcards" 
                             onClick={() => setOpen(false)}
-                            className="text-slate-700 dark:text-slate-200 font-medium text-lg"
+                            className={`font-medium text-lg ${pathname === '/flashcards' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-200'}`}
                         >
                             Flashcards ✨
                         </Link>

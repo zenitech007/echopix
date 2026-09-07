@@ -1,20 +1,12 @@
 "use client";
 
-import React, { useState, useRef, ChangeEvent } from "react";
+import React, { useState, useRef, useEffect, ChangeEvent } from "react";
 import { motion } from "framer-motion";
+import { fileToBase64 } from "@/lib/utils";
+import { callGeminiApi } from "@/lib/gemini";
+import StatusBanner from "@/components/StatusBanner";
 
 /* ---------------- Utilities ---------------- */
-
-const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
 
 const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
     const binaryString = atob(base64);
@@ -79,6 +71,15 @@ export default function AudioStudio() {
 
     const audioRef = useRef<HTMLAudioElement>(null);
 
+    /* ---------- Cleanup object URLs on unmount ---------- */
+
+    useEffect(() => {
+        return () => {
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            if (audioUrl) URL.revokeObjectURL(audioUrl);
+        };
+    }, [previewUrl, audioUrl]);
+
     /* ---------- Handlers ---------- */
 
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -102,23 +103,9 @@ export default function AudioStudio() {
     };
 
     const handleRemoveFile = () => {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
         setSelectedFile(null);
         setPreviewUrl("");
-    };
-
-    const callGeminiApi = async (model: string, payload: any) => {
-        const res = await fetch("/api/gemini", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model, payload }),
-        });
-
-        if (!res.ok) {
-            const body = await res.json();
-            throw new Error(body?.error?.message || "API error");
-        }
-
-        return res.json();
     };
 
     /* ---------- File Extraction ---------- */
@@ -198,6 +185,9 @@ export default function AudioStudio() {
             const pcm16 = new Int16Array(pcm);
 
             const wavBlob = pcmToWav(pcm16, 1, sampleRate);
+
+            if (audioUrl) URL.revokeObjectURL(audioUrl);
+
             const url = URL.createObjectURL(wavBlob);
 
             setAudioUrl(url);
@@ -214,21 +204,6 @@ export default function AudioStudio() {
             setStatus({ message: err.message, type: "error" });
         } finally {
             setIsGenerating(false);
-        }
-    };
-
-    /* ---------- Status Color (Light & Dark Mode) ---------- */
-
-    const getStatusColor = () => {
-        switch (status.type) {
-            case "success":
-                return "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/20";
-            case "error":
-                return "text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20";
-            case "loading":
-                return "text-teal-700 bg-teal-50 border-teal-200 dark:text-teal-400 dark:bg-teal-500/10 dark:border-teal-500/20";
-            default:
-                return "text-slate-600 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-white/5 dark:border-white/10";
         }
     };
 
@@ -310,6 +285,7 @@ export default function AudioStudio() {
 
                             <button
                                 onClick={handleRemoveFile}
+                                aria-label="Remove file"
                                 className="absolute top-3 right-3 bg-white/90 dark:bg-slate-800/90 backdrop-blur text-rose-600 dark:text-rose-400 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm hover:bg-white dark:hover:bg-slate-700 transition-colors"
                             >
                                 Remove
@@ -354,7 +330,7 @@ export default function AudioStudio() {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={handleAudioGeneration}
-                        disabled={isGenerating}
+                        disabled={isGenerating || !textInput.trim()}
                         className="w-full mt-6 py-4 text-lg font-bold text-white rounded-xl shadow-lg bg-linear-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-70 transition-all"
                     >
                         {isGenerating ? "Synthesizing Audio..." : "🔊 Generate Audio"}
@@ -379,13 +355,7 @@ export default function AudioStudio() {
                     )}
 
                     {/* Status */}
-                    {status.message && (
-                        <div
-                            className={`mt-6 px-4 py-3 rounded-xl border font-medium ${getStatusColor()}`}
-                        >
-                            {status.message}
-                        </div>
-                    )}
+                    <StatusBanner message={status.message} type={status.type as "info" | "success" | "error" | "loading"} />
 
                     {/* Audio Player */}
                     {audioUrl && (
@@ -400,6 +370,13 @@ export default function AudioStudio() {
                                 src={audioUrl}
                                 className="w-full h-12"
                             />
+                            <a
+                                href={audioUrl}
+                                download="echopix-audio.wav"
+                                className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors"
+                            >
+                                ⬇️ Download Audio
+                            </a>
                         </motion.div>
                     )}
                 </motion.main>
